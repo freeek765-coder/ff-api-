@@ -121,8 +121,7 @@ def guest_login(uid, password):
     return None, None
 
 def perform_majorlogin(access_token, open_id):
-    # 🔥 अब 0 से 20 तक सारे platform ट्राई करो
-    platforms = list(range(0, 21))  # 0,1,2,...,20
+    platforms = list(range(0, 21))
     for platform_type in platforms:
         for major_url in MAJOR_LOGIN_URLS:
             try:
@@ -131,7 +130,6 @@ def perform_majorlogin(access_token, open_id):
                 game_data.game_name = "free fire"
                 game_data.game_version = 1
                 game_data.version_code = "1.108.3"
-                # ---------- REDMI 9A ----------
                 game_data.os_info = "Android OS 10 / API-29"
                 game_data.device_type = "Handheld"
                 game_data.network_provider = "WiFi"
@@ -143,7 +141,6 @@ def perform_majorlogin(access_token, open_id):
                 game_data.total_ram = 2048
                 game_data.gpu_name = "PowerVR GE8320"
                 game_data.gpu_version = "OpenGL ES 3.2"
-                # ----- EXTRA -----
                 game_data.device_form_factor = "Mobile"
                 game_data.device_model = "Redmi 9A"
                 game_data.build_number = "QKQ1.190711.020"
@@ -152,7 +149,6 @@ def perform_majorlogin(access_token, open_id):
                 game_data.field_98 = 0
                 game_data.total_storage = 32000
                 game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
-                # ------------------
                 game_data.user_id = f"Google|{random.randint(100000,999999)}"
                 game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
                 game_data.language = "en"
@@ -185,7 +181,7 @@ def perform_majorlogin(access_token, open_id):
                         example_msg.ParseFromString(response.content)
                         token_value = getattr(example_msg, "token", None)
                         if token_value:
-                            logger.info(f"✅ MajorLogin success on {major_url} with platform {platform_type}")
+                            logger.info(f"✅ MajorLogin success on {major_url} platform {platform_type}")
                             return token_value
                     except Exception as e:
                         logger.warning(f"Parse error: {e}")
@@ -199,13 +195,20 @@ def change_nickname(jwt_token, new_name):
     account_id, old_name, region, release_version = extract_jwt_info(jwt_token)
     if not new_name or len(new_name) < 3 or len(new_name) > 12:
         return None, "Name must be 3-12 characters"
+
+    # Build encrypted data
     try:
         msg = data_pb2.Message()
         msg.data = new_name.encode("utf-8")
         msg.timestamp = int(time.time() * 1000)
         encrypted_data = encrypt_message(msg.SerializeToString())
-    except:
+    except Exception as e:
+        # fallback: plaintext (though likely to fail)
         encrypted_data = new_name.encode('utf-8')
+        logger.warning(f"Fallback to plaintext due to {e}")
+
+    # Try each server
+    results = []
     for url in TARGET_URLS:
         for attempt in range(3):
             try:
@@ -217,9 +220,17 @@ def change_nickname(jwt_token, new_name):
                     "User-Agent": random.choice(USER_AGENTS),
                     "Connection": "Keep-Alive",
                     "Accept-Encoding": "gzip",
-                    "Accept": "*/*"
+                    "Accept": "*/*",
+                    "X-GA": "v1 1",          # added
+                    "Cache-Control": "no-cache"
                 }
                 response = requests.post(url, data=encrypted_data, headers=headers, verify=False, timeout=15)
+                # Store result for debugging
+                results.append({
+                    "url": url,
+                    "status": response.status_code,
+                    "body": response.text[:100]
+                })
                 if response.status_code == 200:
                     return {
                         "success": True,
@@ -233,97 +244,53 @@ def change_nickname(jwt_token, new_name):
                 elif response.status_code == 503:
                     time.sleep(2 ** attempt)
                     continue
-            except:
+            except Exception as e:
+                results.append({"url": url, "error": str(e)})
                 continue
         time.sleep(1)
-    return None, "All servers failed"
 
-# ===================== DEBUG ROUTE (अब पूरा ट्राय करेगा) =====================
+    # All failed – return details
+    return None, f"All servers failed. Details: {json.dumps(results, indent=2)}"
+
+# ============ NEW ENDPOINT: /getjwt (full token) ============
+@app.route("/getjwt", methods=["GET"])
+def get_jwt():
+    uid = request.args.get("uid")
+    password = request.args.get("password")
+    if not uid or not password:
+        return jsonify({"error": "Missing uid/password"}), 400
+    access_token, open_id = guest_login(uid, password)
+    if not access_token:
+        return jsonify({"error": "Guest login failed"}), 401
+    jwt = perform_majorlogin(access_token, open_id)
+    if jwt:
+        return jsonify({"jwt": jwt})  # पूरा JWT
+    else:
+        return jsonify({"error": "MajorLogin failed"}), 401
+
+# ============ UPDATED /debug with full JWT ============
 @app.route("/debug", methods=["GET"])
 def debug_major():
     uid = request.args.get("uid")
     password = request.args.get("password")
     if not uid or not password:
         return jsonify({"error": "Missing uid/password"}), 400
-    
     access_token, open_id = guest_login(uid, password)
     if not access_token:
         return jsonify({"error": "Guest login failed"}), 401
-    
-    # अब असली perform_majorlogin को बुलाओ
     jwt = perform_majorlogin(access_token, open_id)
     if jwt:
         return jsonify({
             "status": "success",
+            "jwt_full": jwt,          # अब पूरा
             "jwt_preview": jwt[:50] + "...",
-            "message": "MajorLogin succeeded with some platform"
+            "message": "MajorLogin succeeded"
         })
     else:
-        # अगर कोई भी platform काम नहीं किया, तो आखिरी error दिखाओ
-        # हम एक टेस्ट request फिर से भेजेंगे platform=0 पर और raw response दिखाएंगे
-        platform_type = 0
-        major_url = MAJOR_LOGIN_URLS[0]
-        try:
-            game_data = my_pb2.GameData()
-            game_data.timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            game_data.game_name = "free fire"
-            game_data.game_version = 1
-            game_data.version_code = "1.108.3"
-            game_data.os_info = "Android OS 10 / API-29"
-            game_data.device_type = "Handheld"
-            game_data.network_provider = "WiFi"
-            game_data.connection_type = "WIFI"
-            game_data.screen_width = 720
-            game_data.screen_height = 1600
-            game_data.dpi = "269"
-            game_data.cpu_info = "ARMv8 VFPv3 NEON"
-            game_data.total_ram = 2048
-            game_data.gpu_name = "PowerVR GE8320"
-            game_data.gpu_version = "OpenGL ES 3.2"
-            game_data.device_form_factor = "Mobile"
-            game_data.device_model = "Redmi 9A"
-            game_data.build_number = "QKQ1.190711.020"
-            game_data.unknown_field_30 = platform_type
-            game_data.field_97 = 0
-            game_data.field_98 = 0
-            game_data.total_storage = 32000
-            game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
-            game_data.user_id = f"Google|{random.randint(100000,999999)}"
-            game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
-            game_data.language = "en"
-            game_data.open_id = open_id
-            game_data.access_token = access_token
-            game_data.platform_type = platform_type
-            game_data.field_99 = str(platform_type)
-            game_data.field_100 = str(platform_type)
+        # Show last failure
+        return jsonify({"error": "MajorLogin failed"}), 401
 
-            encrypted_data = encrypt_message(game_data.SerializeToString())
-            headers = {
-                "User-Agent": random.choice(USER_AGENTS),
-                "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip",
-                "Content-Type": "application/octet-stream",
-                "X-Unity-Version": UNITY_VERSION,
-                "X-GA": "v1 1",
-                "ReleaseVersion": GAME_VERSION,
-                "Accept": "*/*",
-                "Cache-Control": "no-cache"
-            }
-            response = requests.post(major_url, data=encrypted_data, headers=headers, verify=False, timeout=10)
-            return jsonify({
-                "error": "No platform succeeded",
-                "last_response": {
-                    "status_code": response.status_code,
-                    "url": major_url,
-                    "response_base64": base64.b64encode(response.content).decode(),
-                    "response_length": len(response.content),
-                    "headers": dict(response.headers)
-                }
-            })
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-# ===================== ROUTES (बाकी सब पहले जैसा) =====================
+# ============ ROUTES ============
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
@@ -331,13 +298,14 @@ def home():
         "developer": DEVELOPERS,
         "status": "🟢 ONLINE",
         "version": "3.0 FINAL",
-        "features": ["✅ Auto password format", "✅ Multi‑server", "✅ Retry", "✅ Error handling"],
+        "features": ["✅ Auto password format", "✅ Multi‑server", "✅ Retry", "✅ Error handling", "✅ Full JWT support"],
         "endpoints": {
             "guest": "/guest?uid=UID&password=PASS&name=NAME",
             "token": "/token?jwt=JWT&name=NAME",
             "change": "/change?access_token=TOKEN&name=NAME",
             "login": "/login?uid=UID&password=PASS",
-            "debug": "/debug?uid=UID&password=PASS"
+            "debug": "/debug?uid=UID&password=PASS",
+            "getjwt": "/getjwt?uid=UID&password=PASS"
         },
         "example": "/guest?uid=123456&password=123456&name=ProPlayer"
     })
@@ -449,7 +417,7 @@ def test():
 
 @app.errorhandler(404)
 def handle_404(e):
-    return jsonify({"error": "Not found", "available": ["/", "/guest", "/token", "/change", "/login", "/test", "/debug"]}), 404
+    return jsonify({"error": "Not found", "available": ["/", "/guest", "/token", "/change", "/login", "/test", "/debug", "/getjwt"]}), 404
 
 @app.errorhandler(500)
 def handle_500(e):
