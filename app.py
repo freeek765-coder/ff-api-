@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import requests
 import time
 import base64
@@ -196,18 +196,15 @@ def change_nickname(jwt_token, new_name):
     if not new_name or len(new_name) < 3 or len(new_name) > 12:
         return None, "Name must be 3-12 characters"
 
-    # Build encrypted data
     try:
         msg = data_pb2.Message()
         msg.data = new_name.encode("utf-8")
         msg.timestamp = int(time.time() * 1000)
         encrypted_data = encrypt_message(msg.SerializeToString())
     except Exception as e:
-        # fallback: plaintext (though likely to fail)
         encrypted_data = new_name.encode('utf-8')
         logger.warning(f"Fallback to plaintext due to {e}")
 
-    # Try each server
     results = []
     for url in TARGET_URLS:
         for attempt in range(3):
@@ -221,11 +218,10 @@ def change_nickname(jwt_token, new_name):
                     "Connection": "Keep-Alive",
                     "Accept-Encoding": "gzip",
                     "Accept": "*/*",
-                    "X-GA": "v1 1",          # added
+                    "X-GA": "v1 1",
                     "Cache-Control": "no-cache"
                 }
                 response = requests.post(url, data=encrypted_data, headers=headers, verify=False, timeout=15)
-                # Store result for debugging
                 results.append({
                     "url": url,
                     "status": response.status_code,
@@ -249,67 +245,150 @@ def change_nickname(jwt_token, new_name):
                 continue
         time.sleep(1)
 
-    # All failed – return details
     return None, f"All servers failed. Details: {json.dumps(results, indent=2)}"
 
-# ============ NEW ENDPOINT: /getjwt (full token) ============
-@app.route("/getjwt", methods=["GET"])
-def get_jwt():
+# ===================== CHECK ACCOUNT (NEW) =====================
+@app.route("/check", methods=["GET"])
+def check_account():
     uid = request.args.get("uid")
     password = request.args.get("password")
     if not uid or not password:
         return jsonify({"error": "Missing uid/password"}), 400
+
     access_token, open_id = guest_login(uid, password)
     if not access_token:
-        return jsonify({"error": "Guest login failed"}), 401
-    jwt = perform_majorlogin(access_token, open_id)
-    if jwt:
-        return jsonify({"jwt": jwt})  # पूरा JWT
-    else:
-        return jsonify({"error": "MajorLogin failed"}), 401
+        return jsonify({"valid": False, "message": "❌ Invalid or fake account. Please check UID and password."}), 200
 
-# ============ UPDATED /debug with full JWT ============
-@app.route("/debug", methods=["GET"])
-def debug_major():
-    uid = request.args.get("uid")
-    password = request.args.get("password")
-    if not uid or not password:
-        return jsonify({"error": "Missing uid/password"}), 400
-    access_token, open_id = guest_login(uid, password)
-    if not access_token:
-        return jsonify({"error": "Guest login failed"}), 401
     jwt = perform_majorlogin(access_token, open_id)
-    if jwt:
-        return jsonify({
-            "status": "success",
-            "jwt_full": jwt,          # अब पूरा
-            "jwt_preview": jwt[:50] + "...",
-            "message": "MajorLogin succeeded"
-        })
-    else:
-        # Show last failure
-        return jsonify({"error": "MajorLogin failed"}), 401
+    if not jwt:
+        return jsonify({"valid": True, "message": "✅ Account exists but unable to fetch full details (JWT failed).", "open_id": open_id, "access_token": access_token[:20] + "..."}), 200
 
-# ============ ROUTES ============
+    account_id, old_name, region, release_version = extract_jwt_info(jwt)
+    return jsonify({
+        "valid": True,
+        "account": {
+            "uid": uid,
+            "open_id": open_id,
+            "old_name": old_name,
+            "region": region,
+            "account_id": account_id,
+            "release_version": release_version
+        }
+    }), 200
+
+# ===================== MAIN UI =====================
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "app": "Free Fire Nickname Changer",
-        "developer": DEVELOPERS,
-        "status": "🟢 ONLINE",
-        "version": "3.0 FINAL",
-        "features": ["✅ Auto password format", "✅ Multi‑server", "✅ Retry", "✅ Error handling", "✅ Full JWT support"],
-        "endpoints": {
-            "guest": "/guest?uid=UID&password=PASS&name=NAME",
-            "token": "/token?jwt=JWT&name=NAME",
-            "change": "/change?access_token=TOKEN&name=NAME",
-            "login": "/login?uid=UID&password=PASS",
-            "debug": "/debug?uid=UID&password=PASS",
-            "getjwt": "/getjwt?uid=UID&password=PASS"
-        },
-        "example": "/guest?uid=123456&password=123456&name=ProPlayer"
-    })
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔥 FF Nickname Changer</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; font-family: 'Segoe UI', sans-serif; }
+        .container { margin-top: 50px; max-width: 600px; }
+        .card { background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: none; border-radius: 20px; padding: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .form-control { background: rgba(255,255,255,0.1); border: 1px solid #444; color: #fff; border-radius: 10px; }
+        .form-control:focus { background: rgba(255,255,255,0.15); border-color: #ff6b6b; box-shadow: none; }
+        .btn-primary { background: #ff6b6b; border: none; border-radius: 50px; padding: 12px 30px; font-weight: bold; transition: 0.3s; }
+        .btn-primary:hover { background: #ee5a24; transform: scale(1.02); }
+        .btn-outline-light { border-radius: 50px; }
+        .result-box { background: rgba(0,0,0,0.3); border-radius: 12px; padding: 15px; margin-top: 20px; white-space: pre-wrap; word-break: break-all; }
+        .emoji-big { font-size: 2.5rem; }
+        .footer { margin-top: 30px; text-align: center; color: #aaa; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <div class="text-center">
+            <span class="emoji-big">🔥</span>
+            <h1 class="display-6">Free Fire Nickname Changer</h1>
+            <p class="text-muted">✨ Real Account Check • Auto JWT • Multi‑Server</p>
+        </div>
+        <hr style="border-color: #444;">
+        <form action="/guest" method="get" id="changeForm">
+            <div class="mb-3">
+                <label class="form-label">🆔 UID</label>
+                <input type="text" name="uid" class="form-control" placeholder="Enter your UID" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">🔑 Password</label>
+                <input type="password" name="password" class="form-control" placeholder="Guest password (or SHA256 hash)" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">✏️ New Name</label>
+                <input type="text" name="name" class="form-control" placeholder="3-12 characters" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">🚀 Change Name Now</button>
+        </form>
 
+        <hr style="border-color: #444;">
+
+        <div class="d-grid gap-2">
+            <button class="btn btn-outline-light" onclick="checkAccount()">🔍 Check if Account is Real</button>
+        </div>
+        <div id="checkResult" class="result-box" style="display:none;"></div>
+
+        <div id="resultBox" class="result-box" style="display:none;"></div>
+        <div class="footer">
+            <small>Developed with ❤️ by @Prime_x_Samiul • Version 3.0</small>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('changeForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const params = new URLSearchParams(formData).toString();
+    const url = '/guest?' + params;
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            const box = document.getElementById('resultBox');
+            box.style.display = 'block';
+            box.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        })
+        .catch(err => {
+            alert('Error: ' + err);
+        });
+});
+
+function checkAccount() {
+    const uid = document.querySelector('input[name="uid"]').value;
+    const password = document.querySelector('input[name="password"]').value;
+    if (!uid || !password) {
+        alert('Please fill UID and password first!');
+        return;
+    }
+    const url = '/check?uid=' + encodeURIComponent(uid) + '&password=' + encodeURIComponent(password);
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            const box = document.getElementById('checkResult');
+            box.style.display = 'block';
+            if (data.valid) {
+                box.innerHTML = '✅ <b>Real Account</b><br>UID: ' + data.account.uid + '<br>Old Name: ' + data.account.old_name + '<br>Region: ' + data.account.region + '<br>OpenID: ' + data.account.open_id;
+            } else {
+                box.innerHTML = '❌ ' + data.message;
+            }
+        })
+        .catch(err => {
+            alert('Error: ' + err);
+        });
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+    """
+    return render_template_string(html)
+
+# ===================== OTHER ROUTES =====================
 @app.route("/guest", methods=["GET"])
 def process_guest():
     try:
@@ -325,7 +404,7 @@ def process_guest():
             return jsonify({"error": "Login failed", "message": "Check UID/password"}), 401
         jwt_token = perform_majorlogin(access_token, open_id)
         if not jwt_token:
-            return jsonify({"error": "Failed to get JWT", "message": "MajorLogin failed - no platform accepted"}), 401
+            return jsonify({"error": "Failed to get JWT", "message": "MajorLogin failed"}), 401
         result, error = change_nickname(jwt_token, name)
         if result:
             return jsonify({
@@ -411,13 +490,43 @@ def process_login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/getjwt", methods=["GET"])
+def get_jwt():
+    uid = request.args.get("uid")
+    password = request.args.get("password")
+    if not uid or not password:
+        return jsonify({"error": "Missing uid/password"}), 400
+    access_token, open_id = guest_login(uid, password)
+    if not access_token:
+        return jsonify({"error": "Guest login failed"}), 401
+    jwt = perform_majorlogin(access_token, open_id)
+    if jwt:
+        return jsonify({"jwt": jwt})
+    else:
+        return jsonify({"error": "MajorLogin failed"}), 401
+
+@app.route("/debug", methods=["GET"])
+def debug_major():
+    uid = request.args.get("uid")
+    password = request.args.get("password")
+    if not uid or not password:
+        return jsonify({"error": "Missing uid/password"}), 400
+    access_token, open_id = guest_login(uid, password)
+    if not access_token:
+        return jsonify({"error": "Guest login failed"}), 401
+    jwt = perform_majorlogin(access_token, open_id)
+    if jwt:
+        return jsonify({"status": "success", "jwt_full": jwt, "message": "MajorLogin succeeded"})
+    else:
+        return jsonify({"error": "MajorLogin failed"}), 401
+
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify({"status": "ONLINE", "message": "API working", "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"), "developer": DEVELOPERS})
 
 @app.errorhandler(404)
 def handle_404(e):
-    return jsonify({"error": "Not found", "available": ["/", "/guest", "/token", "/change", "/login", "/test", "/debug", "/getjwt"]}), 404
+    return jsonify({"error": "Not found", "available": ["/", "/guest", "/token", "/change", "/login", "/test", "/debug", "/getjwt", "/check"]}), 404
 
 @app.errorhandler(500)
 def handle_500(e):
