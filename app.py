@@ -142,17 +142,19 @@ def perform_majorlogin(access_token, open_id):
                 game_data.game_name = "free fire"
                 game_data.game_version = 1
                 game_data.version_code = "1.108.3"
-                game_data.os_info = "Android OS 11 / API-30"
+                # -------- UPDATED DEVICE INFO (Redmi 9A) --------
+                game_data.os_info = "Android OS 10 / API-29"
                 game_data.device_type = "Handheld"
                 game_data.network_provider = "WiFi"
                 game_data.connection_type = "WIFI"
-                game_data.screen_width = 1080
-                game_data.screen_height = 1920
-                game_data.dpi = "420"
+                game_data.screen_width = 720
+                game_data.screen_height = 1600
+                game_data.dpi = "269"
                 game_data.cpu_info = "ARMv8 VFPv3 NEON"
-                game_data.total_ram = 8192
-                game_data.gpu_name = "Adreno 650"
+                game_data.total_ram = 2048
+                game_data.gpu_name = "PowerVR GE8320"
                 game_data.gpu_version = "OpenGL ES 3.2"
+                # -----------------------------------------------
                 game_data.user_id = f"Google|{random.randint(100000,999999)}"
                 game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
                 game_data.language = "en"
