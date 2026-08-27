@@ -142,12 +142,15 @@ def perform_majorlogin(access_token, open_id):
                 game_data.total_ram = 2048
                 game_data.gpu_name = "PowerVR GE8320"
                 game_data.gpu_version = "OpenGL ES 3.2"
-                # ----- EXTRA FIELDS (JAROORI) -----
+                # ----- JAROORI FIELDS (NEW) -----
                 game_data.device_form_factor = "Mobile"
                 game_data.device_model = "Redmi 9A"
                 game_data.build_number = "QKQ1.190711.020"
                 game_data.unknown_field_30 = platform_type
                 game_data.field_97 = 0
+                game_data.field_98 = 0
+                game_data.total_storage = 32000  # 32 GB
+                game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
                 # -----------------------------------
                 game_data.user_id = f"Google|{random.randint(100000,999999)}"
                 game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
@@ -183,9 +186,11 @@ def perform_majorlogin(access_token, open_id):
                         if token_value:
                             logger.info(f"✅ MajorLogin success on {major_url}")
                             return token_value
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Parse error on {major_url}: {e}")
                         continue
-            except:
+            except Exception as e:
+                logger.warning(f"Request error on {major_url}: {e}")
                 continue
     return None
 
@@ -232,7 +237,80 @@ def change_nickname(jwt_token, new_name):
         time.sleep(1)
     return None, "All servers failed"
 
-# ------------------- ROUTES -------------------
+# ===================== DEBUG ROUTE (NEW) =====================
+@app.route("/debug", methods=["GET"])
+def debug_major():
+    """Check raw response from MajorLogin server"""
+    uid = request.args.get("uid")
+    password = request.args.get("password")
+    if not uid or not password:
+        return jsonify({"error": "Missing uid/password"}), 400
+    
+    access_token, open_id = guest_login(uid, password)
+    if not access_token:
+        return jsonify({"error": "Guest login failed"}), 401
+    
+    platform_type = 8
+    major_url = MAJOR_LOGIN_URLS[0]  # polar bear
+    try:
+        game_data = my_pb2.GameData()
+        game_data.timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        game_data.game_name = "free fire"
+        game_data.game_version = 1
+        game_data.version_code = "1.108.3"
+        game_data.os_info = "Android OS 10 / API-29"
+        game_data.device_type = "Handheld"
+        game_data.network_provider = "WiFi"
+        game_data.connection_type = "WIFI"
+        game_data.screen_width = 720
+        game_data.screen_height = 1600
+        game_data.dpi = "269"
+        game_data.cpu_info = "ARMv8 VFPv3 NEON"
+        game_data.total_ram = 2048
+        game_data.gpu_name = "PowerVR GE8320"
+        game_data.gpu_version = "OpenGL ES 3.2"
+        game_data.device_form_factor = "Mobile"
+        game_data.device_model = "Redmi 9A"
+        game_data.build_number = "QKQ1.190711.020"
+        game_data.unknown_field_30 = platform_type
+        game_data.field_97 = 0
+        game_data.field_98 = 0
+        game_data.total_storage = 32000
+        game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
+        game_data.user_id = f"Google|{random.randint(100000,999999)}"
+        game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
+        game_data.language = "en"
+        game_data.open_id = open_id
+        game_data.access_token = access_token
+        game_data.platform_type = platform_type
+        game_data.field_99 = str(platform_type)
+        game_data.field_100 = str(platform_type)
+
+        encrypted_data = encrypt_message(game_data.SerializeToString())
+        headers = {
+            "User-Agent": random.choice(USER_AGENTS),
+            "Connection": "Keep-Alive",
+            "Accept-Encoding": "gzip",
+            "Content-Type": "application/octet-stream",
+            "X-Unity-Version": UNITY_VERSION,
+            "X-GA": "v1 1",
+            "ReleaseVersion": GAME_VERSION,
+            "Accept": "*/*",
+            "Cache-Control": "no-cache"
+        }
+        response = requests.post(major_url, data=encrypted_data, headers=headers, verify=False, timeout=10)
+        
+        return jsonify({
+            "status_code": response.status_code,
+            "url": major_url,
+            "response_base64": base64.b64encode(response.content).decode(),
+            "response_length": len(response.content),
+            "headers": dict(response.headers)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ===================== ROUTES =====================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
@@ -245,7 +323,8 @@ def home():
             "guest": "/guest?uid=UID&password=PASS&name=NAME",
             "token": "/token?jwt=JWT&name=NAME",
             "change": "/change?access_token=TOKEN&name=NAME",
-            "login": "/login?uid=UID&password=PASS"
+            "login": "/login?uid=UID&password=PASS",
+            "debug": "/debug?uid=UID&password=PASS"
         },
         "example": "/guest?uid=123456&password=123456&name=ProPlayer"
     })
@@ -314,7 +393,6 @@ def process_change():
             return jsonify({"error": "Missing access_token and name", "example": "/change?access_token=TOKEN&name=Pro"}), 400
         if len(name) < 3 or len(name) > 12:
             return jsonify({"error": "Name must be 3-12 characters"}), 400
-        # Get OpenID (guest tokens might fail here, but we try)
         headers = {"access-token": access_token}
         uid_res = requests.get("https://prod-api.reward.ff.garena.com/redemption/api/auth/inspect_token/", headers=headers, verify=False, timeout=10)
         uid_data = uid_res.json()
@@ -358,7 +436,7 @@ def test():
 
 @app.errorhandler(404)
 def handle_404(e):
-    return jsonify({"error": "Not found", "available": ["/", "/guest", "/token", "/change", "/login", "/test"]}), 404
+    return jsonify({"error": "Not found", "available": ["/", "/guest", "/token", "/change", "/login", "/test", "/debug"]}), 404
 
 @app.errorhandler(500)
 def handle_500(e):
