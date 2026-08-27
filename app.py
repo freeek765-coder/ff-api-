@@ -121,8 +121,8 @@ def guest_login(uid, password):
     return None, None
 
 def perform_majorlogin(access_token, open_id):
-    # ✅ 1 से 15 तक सारे प्लेटफॉर्म ट्राई करो
-    platforms = list(range(1, 16))
+    # 🔥 अब 0 से 20 तक सारे platform ट्राई करो
+    platforms = list(range(0, 21))  # 0,1,2,...,20
     for platform_type in platforms:
         for major_url in MAJOR_LOGIN_URLS:
             try:
@@ -159,7 +159,6 @@ def perform_majorlogin(access_token, open_id):
                 game_data.open_id = open_id
                 game_data.access_token = access_token
                 game_data.platform_type = platform_type
-                # ✅ FIX: ये STRING में भेजो (क्योंकि my_pb2 में ये string हैं)
                 game_data.field_99 = str(platform_type)
                 game_data.field_100 = str(platform_type)
 
@@ -186,7 +185,7 @@ def perform_majorlogin(access_token, open_id):
                         example_msg.ParseFromString(response.content)
                         token_value = getattr(example_msg, "token", None)
                         if token_value:
-                            logger.info(f"✅ MajorLogin success on {major_url}")
+                            logger.info(f"✅ MajorLogin success on {major_url} with platform {platform_type}")
                             return token_value
                     except Exception as e:
                         logger.warning(f"Parse error: {e}")
@@ -239,6 +238,7 @@ def change_nickname(jwt_token, new_name):
         time.sleep(1)
     return None, "All servers failed"
 
+# ===================== DEBUG ROUTE (अब पूरा ट्राय करेगा) =====================
 @app.route("/debug", methods=["GET"])
 def debug_major():
     uid = request.args.get("uid")
@@ -250,67 +250,80 @@ def debug_major():
     if not access_token:
         return jsonify({"error": "Guest login failed"}), 401
     
-    platform_type = 1
-    major_url = MAJOR_LOGIN_URLS[0]
-    try:
-        game_data = my_pb2.GameData()
-        game_data.timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        game_data.game_name = "free fire"
-        game_data.game_version = 1
-        game_data.version_code = "1.108.3"
-        game_data.os_info = "Android OS 10 / API-29"
-        game_data.device_type = "Handheld"
-        game_data.network_provider = "WiFi"
-        game_data.connection_type = "WIFI"
-        game_data.screen_width = 720
-        game_data.screen_height = 1600
-        game_data.dpi = "269"
-        game_data.cpu_info = "ARMv8 VFPv3 NEON"
-        game_data.total_ram = 2048
-        game_data.gpu_name = "PowerVR GE8320"
-        game_data.gpu_version = "OpenGL ES 3.2"
-        game_data.device_form_factor = "Mobile"
-        game_data.device_model = "Redmi 9A"
-        game_data.build_number = "QKQ1.190711.020"
-        game_data.unknown_field_30 = platform_type
-        game_data.field_97 = 0
-        game_data.field_98 = 0
-        game_data.total_storage = 32000
-        game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
-        game_data.user_id = f"Google|{random.randint(100000,999999)}"
-        game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
-        game_data.language = "en"
-        game_data.open_id = open_id
-        game_data.access_token = access_token
-        game_data.platform_type = platform_type
-        # ✅ यहाँ भी STRING
-        game_data.field_99 = str(platform_type)
-        game_data.field_100 = str(platform_type)
-
-        encrypted_data = encrypt_message(game_data.SerializeToString())
-        headers = {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Connection": "Keep-Alive",
-            "Accept-Encoding": "gzip",
-            "Content-Type": "application/octet-stream",
-            "X-Unity-Version": UNITY_VERSION,
-            "X-GA": "v1 1",
-            "ReleaseVersion": GAME_VERSION,
-            "Accept": "*/*",
-            "Cache-Control": "no-cache"
-        }
-        response = requests.post(major_url, data=encrypted_data, headers=headers, verify=False, timeout=10)
-        
+    # अब असली perform_majorlogin को बुलाओ
+    jwt = perform_majorlogin(access_token, open_id)
+    if jwt:
         return jsonify({
-            "status_code": response.status_code,
-            "url": major_url,
-            "response_base64": base64.b64encode(response.content).decode(),
-            "response_length": len(response.content),
-            "headers": dict(response.headers)
+            "status": "success",
+            "jwt_preview": jwt[:50] + "...",
+            "message": "MajorLogin succeeded with some platform"
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    else:
+        # अगर कोई भी platform काम नहीं किया, तो आखिरी error दिखाओ
+        # हम एक टेस्ट request फिर से भेजेंगे platform=0 पर और raw response दिखाएंगे
+        platform_type = 0
+        major_url = MAJOR_LOGIN_URLS[0]
+        try:
+            game_data = my_pb2.GameData()
+            game_data.timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            game_data.game_name = "free fire"
+            game_data.game_version = 1
+            game_data.version_code = "1.108.3"
+            game_data.os_info = "Android OS 10 / API-29"
+            game_data.device_type = "Handheld"
+            game_data.network_provider = "WiFi"
+            game_data.connection_type = "WIFI"
+            game_data.screen_width = 720
+            game_data.screen_height = 1600
+            game_data.dpi = "269"
+            game_data.cpu_info = "ARMv8 VFPv3 NEON"
+            game_data.total_ram = 2048
+            game_data.gpu_name = "PowerVR GE8320"
+            game_data.gpu_version = "OpenGL ES 3.2"
+            game_data.device_form_factor = "Mobile"
+            game_data.device_model = "Redmi 9A"
+            game_data.build_number = "QKQ1.190711.020"
+            game_data.unknown_field_30 = platform_type
+            game_data.field_97 = 0
+            game_data.field_98 = 0
+            game_data.total_storage = 32000
+            game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
+            game_data.user_id = f"Google|{random.randint(100000,999999)}"
+            game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
+            game_data.language = "en"
+            game_data.open_id = open_id
+            game_data.access_token = access_token
+            game_data.platform_type = platform_type
+            game_data.field_99 = str(platform_type)
+            game_data.field_100 = str(platform_type)
 
+            encrypted_data = encrypt_message(game_data.SerializeToString())
+            headers = {
+                "User-Agent": random.choice(USER_AGENTS),
+                "Connection": "Keep-Alive",
+                "Accept-Encoding": "gzip",
+                "Content-Type": "application/octet-stream",
+                "X-Unity-Version": UNITY_VERSION,
+                "X-GA": "v1 1",
+                "ReleaseVersion": GAME_VERSION,
+                "Accept": "*/*",
+                "Cache-Control": "no-cache"
+            }
+            response = requests.post(major_url, data=encrypted_data, headers=headers, verify=False, timeout=10)
+            return jsonify({
+                "error": "No platform succeeded",
+                "last_response": {
+                    "status_code": response.status_code,
+                    "url": major_url,
+                    "response_base64": base64.b64encode(response.content).decode(),
+                    "response_length": len(response.content),
+                    "headers": dict(response.headers)
+                }
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+# ===================== ROUTES (बाकी सब पहले जैसा) =====================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
@@ -344,7 +357,7 @@ def process_guest():
             return jsonify({"error": "Login failed", "message": "Check UID/password"}), 401
         jwt_token = perform_majorlogin(access_token, open_id)
         if not jwt_token:
-            return jsonify({"error": "Failed to get JWT", "message": "MajorLogin failed"}), 401
+            return jsonify({"error": "Failed to get JWT", "message": "MajorLogin failed - no platform accepted"}), 401
         result, error = change_nickname(jwt_token, name)
         if result:
             return jsonify({
