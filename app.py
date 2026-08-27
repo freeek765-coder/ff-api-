@@ -121,7 +121,8 @@ def guest_login(uid, password):
     return None, None
 
 def perform_majorlogin(access_token, open_id):
-    platforms = [8, 3, 4, 6]
+    # ✅ FIX 1: 1 से 15 तक सारे प्लेटफॉर्म ट्राई करो (1 = Android)
+    platforms = list(range(1, 16))
     for platform_type in platforms:
         for major_url in MAJOR_LOGIN_URLS:
             try:
@@ -142,24 +143,25 @@ def perform_majorlogin(access_token, open_id):
                 game_data.total_ram = 2048
                 game_data.gpu_name = "PowerVR GE8320"
                 game_data.gpu_version = "OpenGL ES 3.2"
-                # ----- JAROORI FIELDS (NEW) -----
+                # ----- EXTRA JAROORI FIELDS -----
                 game_data.device_form_factor = "Mobile"
                 game_data.device_model = "Redmi 9A"
                 game_data.build_number = "QKQ1.190711.020"
                 game_data.unknown_field_30 = platform_type
                 game_data.field_97 = 0
                 game_data.field_98 = 0
-                game_data.total_storage = 32000  # 32 GB
+                game_data.total_storage = 32000
                 game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
-                # -----------------------------------
+                # ----------------------------------
                 game_data.user_id = f"Google|{random.randint(100000,999999)}"
                 game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
                 game_data.language = "en"
                 game_data.open_id = open_id
                 game_data.access_token = access_token
                 game_data.platform_type = platform_type
-                game_data.field_99 = str(platform_type)
-                game_data.field_100 = str(platform_type)
+                # ✅ FIX 2: ये दोनों अब INT में भेजो (STRING मत करो)
+                game_data.field_99 = platform_type
+                game_data.field_100 = platform_type
 
                 encrypted_data = encrypt_message(game_data.SerializeToString())
                 if not encrypted_data:
@@ -187,10 +189,10 @@ def perform_majorlogin(access_token, open_id):
                             logger.info(f"✅ MajorLogin success on {major_url}")
                             return token_value
                     except Exception as e:
-                        logger.warning(f"Parse error on {major_url}: {e}")
+                        logger.warning(f"Parse error: {e}")
                         continue
             except Exception as e:
-                logger.warning(f"Request error on {major_url}: {e}")
+                logger.warning(f"Request error: {e}")
                 continue
     return None
 
@@ -237,7 +239,7 @@ def change_nickname(jwt_token, new_name):
         time.sleep(1)
     return None, "All servers failed"
 
-# ===================== DEBUG ROUTE (NEW) =====================
+# ===================== DEBUG ROUTE =====================
 @app.route("/debug", methods=["GET"])
 def debug_major():
     """Check raw response from MajorLogin server"""
@@ -250,8 +252,8 @@ def debug_major():
     if not access_token:
         return jsonify({"error": "Guest login failed"}), 401
     
-    platform_type = 8
-    major_url = MAJOR_LOGIN_URLS[0]  # polar bear
+    platform_type = 1  # Android
+    major_url = MAJOR_LOGIN_URLS[0]
     try:
         game_data = my_pb2.GameData()
         game_data.timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -283,8 +285,8 @@ def debug_major():
         game_data.open_id = open_id
         game_data.access_token = access_token
         game_data.platform_type = platform_type
-        game_data.field_99 = str(platform_type)
-        game_data.field_100 = str(platform_type)
+        game_data.field_99 = platform_type
+        game_data.field_100 = platform_type
 
         encrypted_data = encrypt_message(game_data.SerializeToString())
         headers = {
