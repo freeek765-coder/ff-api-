@@ -121,7 +121,7 @@ def guest_login(uid, password):
     return None, None
 
 def perform_majorlogin(access_token, open_id):
-    # ✅ FIX 1: 1 से 15 तक सारे प्लेटफॉर्म ट्राई करो (1 = Android)
+    # ✅ 1 से 15 तक सारे प्लेटफॉर्म ट्राई करो
     platforms = list(range(1, 16))
     for platform_type in platforms:
         for major_url in MAJOR_LOGIN_URLS:
@@ -131,7 +131,7 @@ def perform_majorlogin(access_token, open_id):
                 game_data.game_name = "free fire"
                 game_data.game_version = 1
                 game_data.version_code = "1.108.3"
-                # ---------- REDMI 9A (FULL) ----------
+                # ---------- REDMI 9A ----------
                 game_data.os_info = "Android OS 10 / API-29"
                 game_data.device_type = "Handheld"
                 game_data.network_provider = "WiFi"
@@ -143,7 +143,7 @@ def perform_majorlogin(access_token, open_id):
                 game_data.total_ram = 2048
                 game_data.gpu_name = "PowerVR GE8320"
                 game_data.gpu_version = "OpenGL ES 3.2"
-                # ----- EXTRA JAROORI FIELDS -----
+                # ----- EXTRA -----
                 game_data.device_form_factor = "Mobile"
                 game_data.device_model = "Redmi 9A"
                 game_data.build_number = "QKQ1.190711.020"
@@ -152,16 +152,16 @@ def perform_majorlogin(access_token, open_id):
                 game_data.field_98 = 0
                 game_data.total_storage = 32000
                 game_data.encryption_key = hashlib.md5(f"{access_token}{open_id}".encode()).hexdigest()
-                # ----------------------------------
+                # ------------------
                 game_data.user_id = f"Google|{random.randint(100000,999999)}"
                 game_data.ip_address = f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"
                 game_data.language = "en"
                 game_data.open_id = open_id
                 game_data.access_token = access_token
                 game_data.platform_type = platform_type
-                # ✅ FIX 2: ये दोनों अब INT में भेजो (STRING मत करो)
-                game_data.field_99 = platform_type
-                game_data.field_100 = platform_type
+                # ✅ FIX: ये STRING में भेजो (क्योंकि my_pb2 में ये string हैं)
+                game_data.field_99 = str(platform_type)
+                game_data.field_100 = str(platform_type)
 
                 encrypted_data = encrypt_message(game_data.SerializeToString())
                 if not encrypted_data:
@@ -239,10 +239,8 @@ def change_nickname(jwt_token, new_name):
         time.sleep(1)
     return None, "All servers failed"
 
-# ===================== DEBUG ROUTE =====================
 @app.route("/debug", methods=["GET"])
 def debug_major():
-    """Check raw response from MajorLogin server"""
     uid = request.args.get("uid")
     password = request.args.get("password")
     if not uid or not password:
@@ -252,7 +250,7 @@ def debug_major():
     if not access_token:
         return jsonify({"error": "Guest login failed"}), 401
     
-    platform_type = 1  # Android
+    platform_type = 1
     major_url = MAJOR_LOGIN_URLS[0]
     try:
         game_data = my_pb2.GameData()
@@ -285,8 +283,9 @@ def debug_major():
         game_data.open_id = open_id
         game_data.access_token = access_token
         game_data.platform_type = platform_type
-        game_data.field_99 = platform_type
-        game_data.field_100 = platform_type
+        # ✅ यहाँ भी STRING
+        game_data.field_99 = str(platform_type)
+        game_data.field_100 = str(platform_type)
 
         encrypted_data = encrypt_message(game_data.SerializeToString())
         headers = {
@@ -312,7 +311,6 @@ def debug_major():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ===================== ROUTES =====================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
